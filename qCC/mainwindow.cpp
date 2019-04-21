@@ -117,11 +117,12 @@
 
 //other
 #include "ccCropTool.h"
-#include "ccGLFilterPluginInterface.h"
+#include "ccGLPluginInterface.h"
 #include "ccPersistentSettings.h"
 #include "ccRecentFiles.h"
 #include "ccRegistrationTools.h"
 #include "ccUtils.h"
+#include "db_tree/ccDBRoot.h"
 #include "pluginManager/ccPluginUIManager.h"
 
 //3D mouse handler
@@ -150,8 +151,6 @@
 //global static pointer (as there should only be one instance of MainWindow!)
 static MainWindow* s_instance  = nullptr;
 
-//default 'All files' file filter
-static const QString s_allFilesFilter("All (*.*)");
 //default file filter separator
 static const QString s_fileFilterSeparator(";;");
 
@@ -284,7 +283,7 @@ MainWindow::MainWindow()
 
 	connectActions();
 
-	new3DView();
+	new3DView(true);
 
 	setupInputDevices();
 
@@ -315,6 +314,10 @@ MainWindow::~MainWindow()
 	//we don't want any other dialog/function to use the following structures
 	ccDBRoot* ccRoot = m_ccRoot;
 	m_ccRoot = nullptr;
+
+	//remove all entities from 3D views before quitting to avoid any side-effect
+	//(this won't be done automatically since we've just reset m_ccRoot)
+	ccRoot->getRootEntity()->setDisplay_recursive(nullptr);
 	for (int i = 0; i < getGLWindowCount(); ++i)
 	{
 		getGLWindow(i)->setSceneDB(0);
@@ -358,7 +361,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::initPlugins( )
 {
-	m_pluginUIManager->init( ccPluginManager::pluginList() );
+	m_pluginUIManager->init();
 	
 	// Set up dynamic tool bars
 	addToolBar( Qt::RightToolBarArea, m_pluginUIManager->glFiltersToolbar() );
@@ -4219,8 +4222,8 @@ void MainWindow::doConvertPolylinesToMesh()
 	assert(dim >= 0 && dim < 3);
 
 	const unsigned char Z = static_cast<unsigned char>(dim);
-	const unsigned char X = Z == 2 ? 0 : Z + 1;
-	const unsigned char Y = X == 2 ? 0 : X + 1;
+	const unsigned char X = (Z == 2 ? 0 : Z + 1);
+	const unsigned char Y = (X == 2 ? 0 : X + 1);
 
 	//number of segments
 	unsigned segmentCount = 0;
@@ -5560,7 +5563,7 @@ void MainWindow::zoomOut()
 	}
 }
 
-ccGLWindow* MainWindow::new3DView()
+ccGLWindow* MainWindow::new3DView( bool allowEntitySelection )
 {
 	assert(m_ccRoot && m_mdiArea);
 
@@ -5586,12 +5589,16 @@ ccGLWindow* MainWindow::new3DView()
 
 	m_mdiArea->addSubWindow(viewWidget);
 
-	connect(view3D,	&ccGLWindow::entitySelectionChanged, this, [=] (ccHObject *entity) {
-		m_ccRoot->selectEntity( entity );
-	});
-	connect(view3D,	&ccGLWindow::entitiesSelectionChanged, this, [=] (std::unordered_set<int> entities){
-		m_ccRoot->selectEntities( entities );
-	});
+	if ( allowEntitySelection )
+	{
+		connect(view3D, &ccGLWindow::entitySelectionChanged, this, [=] (ccHObject *entity) {
+			m_ccRoot->selectEntity( entity );
+		});
+		
+		connect(view3D, &ccGLWindow::entitiesSelectionChanged, this, [=] (std::unordered_set<int> entities){
+			m_ccRoot->selectEntities( entities );
+		});
+	}
 
 	//'echo' mode
 	connect(view3D,	&ccGLWindow::mouseWheelRotated, this, &MainWindow::echoMouseWheelRotate);
@@ -5647,8 +5654,10 @@ void MainWindow::doActionResetGUIElementsPos()
 	settings.remove(ccPS::MainWinGeom());
 	settings.remove(ccPS::MainWinState());
 
-	QMessageBox::information(this,"Restart","To finish the process, you'll have to close and restart CloudCompare");
-
+	QMessageBox::information( this,
+							  tr("Restart"),
+							  tr("To finish the process, you'll have to close and restart CloudCompare") );
+	
 	//to avoid saving them right away!
 	s_autoSaveGuiElementPos = false;
 }
@@ -5697,18 +5706,20 @@ void MainWindow::showEvent(QShowEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-	//if (m_uiFrozen)
-	//{
-	//	ccConsole::Error("Close current dialog/interactor first!");
-	//	event->ignore();
-	//}
-	//else
+	// If we don't have anything displayed, then just close...
+	if (m_ccRoot && (m_ccRoot->getRootEntity()->getChildrenNumber() == 0))
 	{
-		if ((m_ccRoot && m_ccRoot->getRootEntity()->getChildrenNumber() == 0)
-			|| QMessageBox::question(	this,
-										"Quit",
-										"Are you sure you want to quit?",
-										QMessageBox::Ok, QMessageBox::Cancel) != QMessageBox::Cancel)
+		event->accept();
+	}
+	else	// ...otherwise confirm
+	{
+		QMessageBox message_box( QMessageBox::Question,
+								 tr("Quit"),
+								 tr("Are you sure you want to quit?"),
+								 QMessageBox::Ok | QMessageBox::Cancel,
+								 this);
+		
+		if ( message_box.exec() == QMessageBox::Ok )
 		{
 			event->accept();
 		}
@@ -5908,7 +5919,9 @@ void MainWindow::toggleExclusiveFullScreen(bool state)
 
 void MainWindow::doActionShowHelpDialog()
 {
-	QMessageBox::information(this, "Documentation", "Please visit http://www.cloudcompare.org/doc");
+	QMessageBox::information( this,
+							  tr("Documentation"),
+							  tr("Please visit http://www.cloudcompare.org/doc") );
 }
 
 void MainWindow::freezeUI(bool state)
@@ -5983,7 +5996,7 @@ void MainWindow::activateRegisterPointPairTool()
 		registerOverlayDialog(m_pprDlg, Qt::TopRightCorner);
 	}
 
-	ccGLWindow* win = new3DView();
+	ccGLWindow* win = new3DView(true);
 	if (!win)
 	{
 		ccLog::Error("[PointPairRegistration] Failed to create dedicated 3D view!");
@@ -6066,15 +6079,12 @@ void MainWindow::activateSectionExtractionMode()
 		m_ccRoot->unselectAllEntities();
 	}
 
-	ccGLWindow* win = new3DView();
+	ccGLWindow* win = new3DView(false);
 	if (!win)
 	{
-		ccLog::Error("[PointPairRegistration] Failed to create dedicated 3D view!");
+		ccLog::Error("[SectionExtraction] Failed to create dedicated 3D view!");
 		return;
 	}
-
-	//warning: we must disable the entity picking signal!
-	win->disconnect(m_ccRoot, SLOT(selectEntity(ccHObject*)));
 
 	if (firstDisplay && firstDisplay->getGlFilter())
 	{
@@ -6203,7 +6213,7 @@ void MainWindow::deactivateSegmentationMode(bool state)
 							bool removeLabel = false;
 							for (unsigned i = 0; i < label->size(); ++i)
 							{
-								if (label->getPoint(i).cloud == entity)
+								if (label->getPickedPoint(i).entity() == entity)
 								{
 									removeLabel = true;
 									break;
@@ -6481,16 +6491,16 @@ void MainWindow::activatePointListPickingMode()
 		return;
 	}
 
-	ccPointCloud* pc = ccHObjectCaster::ToPointCloud(m_selectedEntities[0]);
-	if (!pc)
+	ccHObject* entity = m_selectedEntities[0];
+	if (!entity->isKindOf(CC_TYPES::POINT_CLOUD) && !entity->isKindOf(CC_TYPES::MESH))
 	{
-		ccConsole::Error("Wrong type of entity");
+		ccConsole::Error("Select a cloud or a mesh");
 		return;
 	}
 
-	if (!pc->isVisible() || !pc->isEnabled())
+	if (!entity->isVisible() || !entity->isEnabled())
 	{
-		ccConsole::Error("Points must be visible!");
+		ccConsole::Error("Entity must be visible!");
 		return;
 	}
 
@@ -6506,7 +6516,7 @@ void MainWindow::activatePointListPickingMode()
 	m_plpDlg->markerSizeSpinBox->setValue(win->getDisplayParameters().labelMarkerSize);
 
 	m_plpDlg->linkWith(win);
-	m_plpDlg->linkWithCloud(pc);
+	m_plpDlg->linkWithEntity(entity);
 
 	freezeUI(true);
 
@@ -6523,8 +6533,7 @@ void MainWindow::deactivatePointListPickingMode(bool state)
 {
 	if (m_plpDlg)
 	{
-		//m_plpDlg->linkWith(0);
-		m_plpDlg->linkWithCloud(0);
+		m_plpDlg->linkWithEntity(nullptr);
 	}
 
 	//we enable all GL windows
@@ -7085,7 +7094,7 @@ void MainWindow::onItemPicked(const PickedItem& pi)
 			s_levelMarkersCloud->addPoint(pickedPoint);
 			unsigned markerCount = s_levelMarkersCloud->size();
 			cc2DLabel* label = new cc2DLabel();
-			label->addPoint(s_levelMarkersCloud, markerCount - 1);
+			label->addPickedPoint(s_levelMarkersCloud, markerCount - 1);
 			label->setName(QString("P#%1").arg(markerCount));
 			label->setDisplayedIn2D(false);
 			label->setDisplay(s_pickingWindow);
@@ -9271,11 +9280,21 @@ ccColorScalesManager* MainWindow::getColorScalesManager()
 void MainWindow::closeAll()
 {
 	if (!m_ccRoot)
+	{
 		return;
-
-	if (QMessageBox::question(	this, "Close all", "Are you sure you want to remove all loaded entities?", QMessageBox::Yes, QMessageBox::No ) != QMessageBox::Yes)
+	}
+	
+	QMessageBox message_box( QMessageBox::Question,
+							 tr("Close all"),
+							 tr("Are you sure you want to remove all loaded entities?"),
+							 QMessageBox::Yes | QMessageBox::No,
+							 this );
+	
+	if (message_box.exec() == QMessageBox::No)
+	{
 		return;
-
+	}
+	
 	m_ccRoot->unloadAll();
 
 	redrawAll(false);
@@ -9290,38 +9309,19 @@ void MainWindow::doActionLoadFile()
 	QString currentOpenDlgFilter = settings.value(ccPS::SelectedInputFilter(), BinFilter::GetFileFilter()).toString();
 
 	// Add all available file I/O filters (with import capabilities)
-	QStringList fileFilters;
-	fileFilters.append(s_allFilesFilter);
-	bool defaultFilterFound = false;
+	const QStringList filterStrings = FileIOFilter::ImportFilterList();
+	const QString &allFilter = filterStrings.at( 0 );
+	
+	if ( !filterStrings.contains( currentOpenDlgFilter ) )
 	{
-		for ( const FileIOFilter::Shared &filter : FileIOFilter::GetFilters() )
-		{
-			if (filter->importSupported())
-			{
-				const QStringList	fileFilterList = filter->getFileFilters(true);
-				
-				for ( const QString &fileFilter : fileFilterList )
-				{
-					fileFilters.append( fileFilter );
-					//is it the (last) default filter?
-					if (!defaultFilterFound && (currentOpenDlgFilter == fileFilter))
-					{
-						defaultFilterFound = true;
-					}
-				}
-			}
-		}
+		currentOpenDlgFilter = allFilter;
 	}
-
-	//default filter is still valid?
-	if (!defaultFilterFound)
-		currentOpenDlgFilter = s_allFilesFilter;
-
+	
 	//file choosing dialog
 	QStringList selectedFiles = QFileDialog::getOpenFileNames(	this,
-																"Open file(s)",
+																tr("Open file(s)"),
 																currentPath,
-																fileFilters.join(s_fileFilterSeparator),
+																filterStrings.join(s_fileFilterSeparator),
 																&currentOpenDlgFilter,
 																CCFileDialogOptions());
 	if (selectedFiles.isEmpty())
@@ -9333,9 +9333,11 @@ void MainWindow::doActionLoadFile()
 	settings.setValue(ccPS::SelectedInputFilter(),currentOpenDlgFilter);
 	settings.endGroup();
 
-	if (currentOpenDlgFilter == s_allFilesFilter)
+	if (currentOpenDlgFilter == allFilter)
+	{
 		currentOpenDlgFilter.clear(); //this way FileIOFilter will try to guess the file type automatically!
-
+	}
+	
 	//load files
 	addToDB(selectedFiles, currentOpenDlgFilter);
 }
@@ -9430,7 +9432,7 @@ void MainWindow::doActionSaveFile()
 		{
 			bool atLeastOneExclusive = false;
 
-			//does this filter can export one or several clouds?
+			//can this filter export one or several clouds?
 			bool canExportClouds = true;
 			if (hasCloud)
 			{
@@ -9441,7 +9443,7 @@ void MainWindow::doActionSaveFile()
 				atLeastOneExclusive |= isExclusive;
 			}
 
-			//does this filter can export one or several meshes?
+			//can this filter export one or several meshes?
 			bool canExportMeshes = true;
 			if (hasMesh)
 			{
@@ -9452,7 +9454,7 @@ void MainWindow::doActionSaveFile()
 				atLeastOneExclusive |= isExclusive;
 			}
 
-			//does this filter can export one or several polylines?
+			//can this filter export one or several polylines?
 			bool canExportPolylines = true;
 			if (hasPolylines)
 			{
@@ -9463,7 +9465,7 @@ void MainWindow::doActionSaveFile()
 				atLeastOneExclusive |= isExclusive;
 			}
 
-			//does this filter can export one or several images?
+			//can this filter export one or several images?
 			bool canExportImages = true;
 			if (hasImages)
 			{
@@ -9474,7 +9476,7 @@ void MainWindow::doActionSaveFile()
 				atLeastOneExclusive |= isExclusive;
 			}
 
-			//does this filter can export one or several other serializable entities?
+			//can this filter export one or several other serializable entities?
 			bool canExportSerializables = true;
 			if (hasSerializable)
 			{
@@ -9567,7 +9569,7 @@ void MainWindow::doActionSaveFile()
 
 	//ask the user for the output filename
 	QString selectedFilename = QFileDialog::getSaveFileName(this,
-															"Save file",
+															tr("Save file"),
 															fullPathName,
 															fileFilters.join(s_fileFilterSeparator),
 															&selectedFilter,
@@ -9798,7 +9800,6 @@ void MainWindow::updateMenus()
 	m_UI->actionSegment->setEnabled(hasMdiChild && hasSelectedEntities);
 	m_UI->actionTranslateRotate->setEnabled(hasMdiChild && hasSelectedEntities);
 	m_UI->actionPointPicking->setEnabled(hasMdiChild && hasLoadedEntities);
-	//actionPointListPicking->setEnabled(hasMdiChild);
 	m_UI->actionTestFrameRate->setEnabled(hasMdiChild);
 	m_UI->actionRenderToFile->setEnabled(hasMdiChild);
 	m_UI->actionToggleSunLight->setEnabled(hasMdiChild);
@@ -10084,7 +10085,7 @@ void MainWindow::enableUIItems(dbTreeSelectionInfo& selInfo)
 	m_UI->actionRasterize->setEnabled(exactlyOneCloud);
 	m_UI->actionCompute2HalfDimVolume->setEnabled(selInfo.cloudCount == selInfo.selCount && selInfo.cloudCount >= 1 && selInfo.cloudCount <= 2); //one or two clouds!
 
-	m_UI->actionPointListPicking->setEnabled(exactlyOneEntity);
+	m_UI->actionPointListPicking->setEnabled(exactlyOneCloud || exactlyOneMesh);
 
 	// == 2
 	bool exactlyTwoEntities = (selInfo.selCount == 2);

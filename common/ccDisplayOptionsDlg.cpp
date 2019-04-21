@@ -46,7 +46,7 @@ ccDisplayOptionsDlg::ccDisplayOptionsDlg(QWidget* parent)
 	connect(m_ui->labelBkgColorButton,		&QAbstractButton::clicked,	this, &ccDisplayOptionsDlg::changeLabelBackgroundColor);
 	connect(m_ui->labelMarkerColorButton,	&QAbstractButton::clicked,	this, &ccDisplayOptionsDlg::changeLabelMarkerColor);
 	connect(m_ui->pointsColorButton,		&QAbstractButton::clicked,	this, &ccDisplayOptionsDlg::changePointsColor);
-	connect(m_ui->pointsColorButton,		&QAbstractButton::clicked,	this, &ccDisplayOptionsDlg::changeTextColor);
+	connect(m_ui->textColorButton,			&QAbstractButton::clicked,	this, &ccDisplayOptionsDlg::changeTextColor);
 
 	connect(m_ui->doubleSidedCheckBox,             &QCheckBox::toggled, this, [&](bool state) { parameters.lightDoubleSided = state; });
 	connect(m_ui->enableGradientCheckBox,          &QCheckBox::toggled, this, [&](bool state) { parameters.drawBackgroundGradient = state; });
@@ -142,7 +142,7 @@ void ccDisplayOptionsDlg::refresh()
 
 	const ccColor::Rgbub& tdc = parameters.textDefaultCol;
 	textDefaultCol.setRgb(tdc.r, tdc.g, tdc.b);
-	ccQtHelpers::SetButtonColor(m_ui->pointsColorButton, textDefaultCol);
+	ccQtHelpers::SetButtonColor(m_ui->textColorButton, textDefaultCol);
 
 	m_ui->doubleSidedCheckBox->setChecked(parameters.lightDoubleSided);
 	m_ui->enableGradientCheckBox->setChecked(parameters.drawBackgroundGradient);
@@ -285,7 +285,7 @@ void ccDisplayOptionsDlg::changeTextColor()
 		return;
 
 	textDefaultCol = newCol;
-	ccQtHelpers::SetButtonColor(m_ui->pointsColorButton, textDefaultCol);
+	ccQtHelpers::SetButtonColor(m_ui->textColorButton, textDefaultCol);
 	parameters.textDefaultCol = ccColor::FromQColor(textDefaultCol);
 
 	update();

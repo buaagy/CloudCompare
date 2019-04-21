@@ -70,14 +70,18 @@ AsciiOpenDlg* AsciiFilter::GetOpenDialog(QWidget* parentWidget/*=0*/)
 	return s_openDialog;
 }
 
-bool AsciiFilter::canLoadExtension(const QString& upperCaseExt) const
+
+AsciiFilter::AsciiFilter()
+	: FileIOFilter( {
+					"_ASCII Filter",
+					2.0f,	// priority
+					QStringList{ "txt", "asc", "neu", "xyz", "pts", "csv" },
+					"asc",
+					QStringList{ GetFileFilter() },
+					QStringList{ GetFileFilter() },
+					Import | Export | BuiltIn
+					} )
 {
-	return (	upperCaseExt == "ASC"
-			||	upperCaseExt == "TXT"
-			||	upperCaseExt == "XYZ"
-			||	upperCaseExt == "NEU"
-			||	upperCaseExt == "PTS"
-			||	upperCaseExt == "CSV");
 }
 
 bool AsciiFilter::canSave(CC_CLASS_ENUM type, bool& multiple, bool& exclusive) const
@@ -1011,7 +1015,7 @@ CC_FILE_ERROR AsciiFilter::loadCloudFromFormatedAsciiFile(	const QString& filena
 			if (cloudDesc.labelIndex >= 0)
 			{
 				cc2DLabel* label = new cc2DLabel();
-				label->addPoint(cloudDesc.cloud, cloudDesc.cloud->size() - 1);
+				label->addPickedPoint(cloudDesc.cloud, cloudDesc.cloud->size() - 1);
 				label->setName(parts[cloudDesc.labelIndex]);
 				label->setDisplayedIn2D(showLabelsIn2D);
 				label->displayPointLegend(!showLabelsIn2D);

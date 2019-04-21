@@ -441,13 +441,13 @@ ccPointCloud::~ccPointCloud()
 
 void ccPointCloud::clear()
 {
-	unalloactePoints();
+	unallocatePoints();
 	unallocateColors();
 	unallocateNorms();
 	//enableTempColor(false); //DGM: why?
 }
 
-void ccPointCloud::unalloactePoints()
+void ccPointCloud::unallocatePoints()
 {
 	clearLOD();	// we have to clear the LOD structure before clearing the colors / SFs, so we can't leave it to notifyGeometryUpdate()
 	showSFColorsScale(false); //SFs will be destroyed
@@ -464,6 +464,18 @@ void ccPointCloud::notifyGeometryUpdate()
 	releaseVBOs();
 	clearLOD();
 }
+
+void ccPointCloud::setDisplay(ccGenericGLDisplay* win)
+{
+	if (m_currentDisplay && win != m_currentDisplay)
+	{
+		//be sure to release the VBOs before switching to another (or no) display!
+		releaseVBOs();
+	}
+
+	BaseClass::setDisplay(win);
+}
+
 
 ccGenericPointCloud* ccPointCloud::clone(ccGenericPointCloud* destCloud/*=0*/, bool ignoreChildren/*=false*/)
 {
@@ -1017,11 +1029,13 @@ const ccPointCloud& ccPointCloud::append(ccPointCloud* addedCloud, unsigned poin
 				cc2DLabel* newLabel = new cc2DLabel(label->getName());
 				for (unsigned j = 0; j < label->size(); ++j)
 				{
-					const cc2DLabel::PickedPoint& P = label->getPoint(j);
-					if (P.cloud == addedCloud)
-						newLabel->addPoint(this, pointCountBefore + P.index);
-					else
-						newLabel->addPoint(P.cloud, P.index);
+					cc2DLabel::PickedPoint P = label->getPickedPoint(j);
+					if (P._cloud == addedCloud)
+					{
+						P._cloud = this;
+						P.index += pointCountBefore;
+					}
+					newLabel->addPickedPoint(P);
 				}
 				newLabel->displayPointLegend(label->isPointLegendDisplayed());
 				newLabel->setDisplayedIn2D(label->isDisplayedIn2D());
@@ -2703,7 +2717,7 @@ void ccPointCloud::drawMeOnly(CC_DRAW_CONTEXT& context)
 			//if some points are hidden (= visibility table instantiated), we can't use display arrays :(
 			if (isVisibilityTableInstantiated())
 			{
-				assert(m_pointsVisibility.capacity() == m_points.size());
+				assert(m_pointsVisibility.size() == m_points.size());
 				//compressed normals set
 				const ccNormalVectors* compressedNormals = ccNormalVectors::GetUniqueInstance();
 				assert(compressedNormals);
